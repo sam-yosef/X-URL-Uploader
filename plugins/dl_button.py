@@ -1,13 +1,9 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-# (c) Shrimadhav U K
+# LISA 🖤💗
 
-# the logging things
 import logging
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
 import asyncio
 import aiohttp
 import json
@@ -16,36 +12,28 @@ import os
 import shutil
 import time
 from datetime import datetime
-
 # the secret configuration specific things
-if bool(os.environ.get("WEBHOOK", False)):
-    from sample_config import Config
-else:
-    from config import Config
-
+from config import Config
 # the Strings used for this "thing"
-from translation import Translation
-
-import pyrogram
+from plugins.startmsg import Translation
+from plugins.thumbnail import *
 logging.getLogger("pyrogram").setLevel(logging.WARNING)
-
 from helper_funcs.display_progress import progress_for_pyrogram, humanbytes, TimeFormatter
 from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 # https://stackoverflow.com/a/37631799/4723940
 from PIL import Image
 
-
 async def ddl_call_back(bot, update):
-    logger.info(update)
+    #logger.info(update)
     cb_data = update.data
     # youtube_dl extractors
     tg_send_type, youtube_dl_format, youtube_dl_ext = cb_data.split("=")
+    youtube_dl_url = update.message.reply_to_message.text
     thumb_image_path = Config.DOWNLOAD_LOCATION + \
         "/" + str(update.from_user.id) + ".jpg"
-    youtube_dl_url = update.message.reply_to_message.text
     custom_file_name = os.path.basename(youtube_dl_url)
-    if "|" in youtube_dl_url:
+    if " * " in youtube_dl_url:
         url_parts = youtube_dl_url.split("|")
         if len(url_parts) == 2:
             youtube_dl_url = url_parts[0]
@@ -63,8 +51,6 @@ async def ddl_call_back(bot, update):
         if custom_file_name is not None:
             custom_file_name = custom_file_name.strip()
         # https://stackoverflow.com/a/761825/4723940
-        logger.info(youtube_dl_url)
-        logger.info(custom_file_name)
     else:
         for entity in update.message.reply_to_message.entities:
             if entity.type == "text_link":
@@ -73,12 +59,16 @@ async def ddl_call_back(bot, update):
                 o = entity.offset
                 l = entity.length
                 youtube_dl_url = youtube_dl_url[o:o + l]
-    user = await bot.get_me()
-    mention = user["mention"]
-    description = Translation.CUSTOM_CAPTION_UL_FILE.format(mention)
+    
+    description = custom_file_name
+    if not "." + youtube_dl_ext in custom_file_name:
+        custom_file_name += '.' + youtube_dl_ext
+    logger.info(youtube_dl_url)
+    logger.info(custom_file_name)
+    
     start = datetime.now()
     await bot.edit_message_text(
-        text=Translation.DOWNLOAD_START,
+        text=Translation.DOWNLOAD_START.format(custom_file_name),
         chat_id=update.message.chat.id,
         message_id=update.message.message_id
     )
@@ -107,6 +97,9 @@ async def ddl_call_back(bot, update):
             )
             return False
     if os.path.exists(download_directory):
+        save_ytdl_json_path = Config.DOWNLOAD_LOCATION + "/" + str(update.message.chat.id) + ".json"
+        if os.path.exists(save_ytdl_json_path):
+            os.remove(save_ytdl_json_path)
         end_one = datetime.now()
         await bot.edit_message_text(
             text=Translation.UPLOAD_START,
@@ -127,88 +120,47 @@ async def ddl_call_back(bot, update):
                 message_id=update.message.message_id
             )
         else:
-            # get the correct width, height, and duration for videos greater than 10MB
-            # ref: message from @BotSupport
-            width = 0
-            height = 0
-            duration = 0
-            if tg_send_type != "file":
-                metadata = extractMetadata(createParser(download_directory))
-                if metadata is not None:
-                    if metadata.has("duration"):
-                        duration = metadata.get('duration').seconds
-            # get the correct width, height, and duration for videos greater than 10MB
-            if os.path.exists(thumb_image_path):
-                width = 0
-                height = 0
-                metadata = extractMetadata(createParser(thumb_image_path))
-                if metadata.has("width"):
-                    width = metadata.get("width")
-                if metadata.has("height"):
-                    height = metadata.get("height")
-                if tg_send_type == "vm":
-                    height = width
-                # resize image
-                # ref: https://t.me/PyrogramChat/44663
-                # https://stackoverflow.com/a/21669827/4723940
-                Image.open(thumb_image_path).convert(
-                    "RGB").save(thumb_image_path)
-                img = Image.open(thumb_image_path)
-                # https://stackoverflow.com/a/37631799/4723940
-                # img.thumbnail((90, 90))
-                if tg_send_type == "file":
-                    img.resize((320, height))
-                else:
-                    img.resize((90, height))
-                img.save(thumb_image_path, "JPEG")
-                # https://pillow.readthedocs.io/en/3.1.x/reference/Image.html#create-thumbnails
-            else:
-                thumb_image_path = None
+            # ref: message from @SOURCES_CODES
             start_time = time.time()
             # try to upload file
             if tg_send_type == "audio":
-                user = await bot.get_me()
-                mention = user["mention"]
-                audio = await bot.send_audio(
+                duration = await Mdata03(download_directory)
+                thumb_image_path = await Gthumb01(bot, update)
+                await bot.send_audio(
                     chat_id=update.message.chat.id,
                     audio=download_directory,
                     caption=description,
                     duration=duration,
-                    # performer=response_json["uploader"],
-                    # title=response_json["title"],
-                    # reply_markup=reply_markup,
                     thumb=thumb_image_path,
                     reply_to_message_id=update.message.reply_to_message.message_id,
                     progress=progress_for_pyrogram,
                     progress_args=(
                         Translation.UPLOAD_START,
                         update.message,
+                        custom_file_name,
                         start_time
                     )
                 )
-                await audio.forward(Config.LOG_CHANNEL)
             elif tg_send_type == "file":
-                user = await bot.get_me()
-                mention = user["mention"]
-                document = await bot.send_document(
+                thumb_image_path = await Gthumb01(bot, update)
+                await bot.send_document(
                     chat_id=update.message.chat.id,
                     document=download_directory,
                     thumb=thumb_image_path,
                     caption=description,
-                    # reply_markup=reply_markup,
                     reply_to_message_id=update.message.reply_to_message.message_id,
                     progress=progress_for_pyrogram,
                     progress_args=(
                         Translation.UPLOAD_START,
                         update.message,
+                        custom_file_name,
                         start_time
                     )
                 )
-                await document.forward(Config.LOG_CHANNEL)
             elif tg_send_type == "vm":
-                user = await bot.get_me()
-                mention = user["mention"]
-                video_note = await bot.send_video_note(
+                width, duration = await Mdata02(download_directory)
+                thumb_image_path = await Gthumb02(bot, update, duration, download_directory)
+                await bot.send_video_note(
                     chat_id=update.message.chat.id,
                     video_note=download_directory,
                     duration=duration,
@@ -219,15 +171,14 @@ async def ddl_call_back(bot, update):
                     progress_args=(
                         Translation.UPLOAD_START,
                         update.message,
+                        custom_file_name,
                         start_time
                     )
                 )
-                vm = await video_note.forward(Config.LOG_CHANNEL)
-                await vm.reply_text(f"Submitted by {update.from_user.mention}\nUploaded by {mention}")
             elif tg_send_type == "video":
-                user = await bot.get_me()
-                mention = user["mention"]
-                video = await bot.send_video(
+                width, height, duration = await Mdata01(download_directory)
+                thumb_image_path = await Gthumb02(bot, update, duration, download_directory)
+                await bot.send_video(
                     chat_id=update.message.chat.id,
                     video=download_directory,
                     caption=description,
@@ -235,17 +186,16 @@ async def ddl_call_back(bot, update):
                     width=width,
                     height=height,
                     supports_streaming=True,
-                    # reply_markup=reply_markup,
                     thumb=thumb_image_path,
                     reply_to_message_id=update.message.reply_to_message.message_id,
                     progress=progress_for_pyrogram,
                     progress_args=(
                         Translation.UPLOAD_START,
                         update.message,
+                        custom_file_name,
                         start_time
                     )
                 )
-                await video.forward(Config.LOG_CHANNEL)
             else:
                 logger.info("Did this happen? :\\")
             end_two = datetime.now()
@@ -262,6 +212,9 @@ async def ddl_call_back(bot, update):
                 message_id=update.message.message_id,
                 disable_web_page_preview=True
             )
+            logger.info("✅ " + custom_file_name)
+            logger.info("✅ Downloaded in: " + str(time_taken_for_download))
+            logger.info("✅ Uploaded in: " + str(time_taken_for_upload))
     else:
         await bot.edit_message_text(
             text=Translation.NO_VOID_FORMAT_FOUND.format("Incorrect Link"),
@@ -279,13 +232,6 @@ async def download_coroutine(bot, session, url, file_name, chat_id, message_id, 
         content_type = response.headers["Content-Type"]
         if "text" in content_type and total_length < 500:
             return await response.release()
-        await bot.edit_message_text(
-            chat_id,
-            message_id,
-            text="""Initiating Download
-URL: {}
-File Size: {}""".format(url, humanbytes(total_length))
-        )
         with open(file_name, "wb") as f_handle:
             while True:
                 chunk = await response.content.read(Config.CHUNK_SIZE)
@@ -303,10 +249,13 @@ File Size: {}""".format(url, humanbytes(total_length))
                         (total_length - downloaded) / speed) * 1000
                     estimated_total_time = elapsed_time + time_to_completion
                     try:
-                        current_message = """**Download Status**
-URL: {}
+                        current_message = """**DOWNLOADING**
+URL: `{}`
+
 File Size: {}
+
 Downloaded: {}
+
 ETA: {}""".format(
     url,
     humanbytes(total_length),
