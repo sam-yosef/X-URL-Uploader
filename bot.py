@@ -1,6 +1,5 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-# (c) Shrimadhav U K
+from aiohttp import web
+from route import web_server
 
 # the logging things
 import logging
